@@ -23,7 +23,7 @@ add_executable(octet
     src/colored_cell_set_polyhedron.cpp
     src/colored_polyhedron.cpp
     src/colored_vector_dictionary.cpp
-)
+ "src/piece.cpp")
 
 target_link_libraries(octet
     PRIVATE

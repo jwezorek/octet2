@@ -352,6 +352,116 @@ namespace {
         return output;
     }
 
+    constexpr std::size_t octa_edge_count = 12;
+    using octahedron_rotation_table =
+        std::array<std::array<ot::matrix4, octa_edge_count>, octa_edge_count>;
+
+    ot::matrix4 generate_octahedron_edge_rotation(ot::octa_edge from, ot::octa_edge to)
+    {
+        if (from == to) {
+            return ot::identity_matrix();
+        }
+
+        ot::matrix3 octa_axis_to_space;
+        octa_axis_to_space.col(0) =
+            ot::normalize(origin_octa_vertex_location(ot::octa_vert::top));
+
+        octa_axis_to_space.col(1) =
+            ot::normalize(origin_octa_vertex_location(ot::octa_vert::north_east));
+
+        octa_axis_to_space.col(2) =
+            ot::normalize(origin_octa_vertex_location(ot::octa_vert::south_east));
+
+        std::array<int, 3> permutation = { 0, 1, 2 };
+        do {
+            for (int sign_0 : { -1, 1 }) {
+                for (int sign_1 : { -1, 1 }) {
+                    for (int sign_2 : { -1, 1 }) {
+                        const std::array<int, 3> signs = { sign_0, sign_1, sign_2 };
+
+                        ot::matrix3 signed_permutation = ot::matrix3::Zero();
+                        for (int i = 0; i < 3; ++i) {
+                            signed_permutation(permutation[i], i) =
+                                static_cast<double>(signs[i]);
+                        }
+
+                        if (signed_permutation.determinant() < 0.0) {
+                            continue;
+                        }
+
+                        const ot::matrix3 rotation =
+                            octa_axis_to_space *
+                            signed_permutation *
+                            octa_axis_to_space.inverse();
+
+                        if (rotation_maps_directed_edge(rotation, from, to)) {
+                            return cell_coordinate_matrix_from_space_rotation(rotation);
+                        }
+                    }
+                }
+            }
+        } while (std::next_permutation(permutation.begin(), permutation.end()));
+
+        throw std::runtime_error("Could not generate octahedron edge rotation");
+    }
+
+    const octahedron_rotation_table& octahedron_edge_rotation_table()
+    {
+        static const octahedron_rotation_table table = [] {
+            octahedron_rotation_table output;
+            const std::vector<ot::octa_edge> edges = ot::octahedron_edges();
+
+            if (edges.size() != octa_edge_count) {
+                throw std::runtime_error("Unexpected number of octahedron edges");
+            }
+
+            for (ot::octa_edge from : edges) {
+                const std::size_t from_index =
+                    static_cast<std::size_t>(ot::enum_index(from));
+
+                if (from_index >= octa_edge_count) {
+                    throw std::runtime_error("Unexpected octahedron edge enum value");
+                }
+
+                for (ot::octa_edge to : edges) {
+                    const std::size_t to_index =
+                        static_cast<std::size_t>(ot::enum_index(to));
+
+                    if (to_index >= octa_edge_count) {
+                        throw std::runtime_error("Unexpected octahedron edge enum value");
+                    }
+
+                    output[from_index][to_index] =
+                        generate_octahedron_edge_rotation(from, to);
+                }
+            }
+
+            return output;
+        }();
+
+        return table;
+    }
+
+    int count_octahedron_neighbors_in_set(
+        const ot::cell& tetrahedron,
+        const ot::cell_set& octahedra)
+    {
+        if (tetrahedron.type != ot::cell_type::tetrahedron) {
+            throw std::invalid_argument("Expected tetrahedron");
+        }
+
+        int count = 0;
+
+        for (const ot::cell& neighbor : tetrahedron.neighbors()) {
+            if (neighbor.type == ot::cell_type::octahedron &&
+                octahedra.has_cell(neighbor)) {
+                ++count;
+            }
+        }
+
+        return count;
+    }
+
 } // namespace
 
 const std::array<ot::octa_face, 8>& ot::octa_faces()
@@ -871,51 +981,32 @@ ot::matrix4 ot::translate_octahedra(ot::octa_edge direction, int distance)
             static_cast<double>(distance * offset.layer)));
 }
 
-ot::matrix4 ot::rotate_octahedra(ot::octa_edge from, ot::octa_edge to)
+ot::cell_set ot::fill_tetrahedra(const ot::cell_set& cells)
 {
-    if (from == to) {
-        return ot::identity_matrix();
+    ot::cell_set output = cells;
+
+    const ot::cell_set octahedra(cells.octahedra());
+
+    ot::cell_set candidate_tetrahedra;
+    for (const ot::cell& octahedron : octahedra.cells()) {
+        for (ot::octa_face face : ot::octa_faces()) {
+            candidate_tetrahedra.add_cell(
+                ot::get_neighbor(octahedron, face));
+        }
     }
 
-    ot::matrix3 octa_axis_to_space;
-    octa_axis_to_space.col(0) =
-        ot::normalize(origin_octa_vertex_location(ot::octa_vert::top));
-
-    octa_axis_to_space.col(1) =
-        ot::normalize(origin_octa_vertex_location(ot::octa_vert::north_east));
-
-    octa_axis_to_space.col(2) =
-        ot::normalize(origin_octa_vertex_location(ot::octa_vert::south_east));
-
-    std::array<int, 3> permutation = { 0, 1, 2 };
-    do {
-        for (int sign_0 : { -1, 1 }) {
-            for (int sign_1 : { -1, 1 }) {
-                for (int sign_2 : { -1, 1 }) {
-                    const std::array<int, 3> signs = { sign_0, sign_1, sign_2 };
-
-                    ot::matrix3 signed_permutation = ot::matrix3::Zero();
-                    for (int i = 0; i < 3; ++i) {
-                        signed_permutation(permutation[i], i) =
-                            static_cast<double>(signs[i]);
-                    }
-
-                    if (signed_permutation.determinant() < 0.0) {
-                        continue;
-                    }
-
-                    const ot::matrix3 rotation =
-                        octa_axis_to_space *
-                        signed_permutation *
-                        octa_axis_to_space.inverse();
-
-                    if (rotation_maps_directed_edge(rotation, from, to)) {
-                        return cell_coordinate_matrix_from_space_rotation(rotation);
-                    }
-                }
-            }
+    for (const ot::cell& tetrahedron : candidate_tetrahedra.cells()) {
+        if (count_octahedron_neighbors_in_set(tetrahedron, octahedra) >= 2) {
+            output.add_cell(tetrahedron);
         }
-    } while (std::next_permutation(permutation.begin(), permutation.end()));
+    }
 
-    throw std::runtime_error("Could not generate octahedron edge rotation");
+    return output;
+}
+
+ot::matrix4 ot::rotate_octahedra(ot::octa_edge from, ot::octa_edge to)
+{
+    return octahedron_edge_rotation_table()
+        [static_cast<std::size_t>(ot::enum_index(from))]
+        [static_cast<std::size_t>(ot::enum_index(to))];
 }

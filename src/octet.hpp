@@ -143,6 +143,7 @@ namespace ot {
     std::vector<cell> explode(const std::vector<cell>& input);
     matrix4 rotate_octahedra(ot::octa_edge from, ot::octa_edge to);
     matrix4 translate_octahedra(ot::octa_edge direction, int distance);
+    cell_set fill_tetrahedra( const ot::cell_set& cells );
 }
 
 
